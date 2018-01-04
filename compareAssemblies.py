@@ -6,13 +6,20 @@ import csv
 import argparse
 import re
 import numpy as np
-from Bio import SeqIO
+from Bio import SeqIO,SeqUtils
+import matplotlib
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set(color_codes=True)
+
+# Notes: gzip not supported with biopython SeqIO
 
 def parseArgs() :
 	parser = argparse.ArgumentParser(description='compare assemblies with minimap2')
-	parser.add_argument('-a', help='input assembly 1 (ref) fasta', dest='asm1Filename',required=True)
-	parser.add_argument('-b', help='input assembly 2 (query) fasta', dest='asm2Filename',required=True)
-	parser.add_argument('-m', help='minimum sequence length in assembly 2, default=20Mb', dest='minQueryLen',required=False, default=20000000, type=int)
+	parser.add_argument('-r', help='input assembly 1 (ref) fasta', dest='asm1Filename',required=True)
+	parser.add_argument('-q', help='input assembly 2 (query) fasta', dest='asm2Filename',required=True)
+	parser.add_argument('-m', help='minimum sequence length in assembly 2 (query), default=20Mb', dest='minQueryLen',required=False, default=20000000, type=int)
 	parser.add_argument('-o', help='output prefix, default=output', dest='outputPrefix', required=False, default='output')
 	parser.add_argument('-d', help='turn off saving minimap2 results', dest='saveMinimap', required=False, action='store_false', default=True)
 	arguments = parser.parse_args()
@@ -81,9 +88,12 @@ def writeOutput(outputPrefix, saveMinimap, scaffoldMapListOut, hitsListAllOut) :
 		hitsDf = pd.DataFrame([i.split('\t') for i in hitsListAllOut], columns=['q','q_len','q_st','q_en','strand','ctg','ctg_len','r_st','r_en','mlen','blen','mapq','f1','f2','cigar'])
 		hitsDf.to_csv(outputPrefix + "_minimap2.txt", index=False, sep="\t")
 
-def findGaps(scaffoldMapList, asm1, asm2, min_gap_size):
+def getMetrics(scaffoldMapList, asm1, asm2, min_gap_size, outputPrefix):
 	ref_dict = SeqIO.index(asm1, "fasta")
 	query_dict = SeqIO.index(asm2, "fasta")
+	ref_lengths = []
+	query_lengths = []
+	# loop over scaffold pairs, get info on lengths, gaps
 	for i in scaffoldMapList:
 		# reference asm gaps
 		gaps_ref = re.findall('([Nn]+)', str(ref_dict[i['refID']].seq))
@@ -92,6 +102,7 @@ def findGaps(scaffoldMapList, asm1, asm2, min_gap_size):
 		i['ref_totalGapsLength'] = len("".join(gaps_ref_filtered))  # append new data to dictionary scaffoldMapList
 		i['ref_meanGapsLength'] = np.mean([len(x) for x in gaps_ref_filtered]).round(decimals=2)
 		i['ref_length'] = len(ref_dict[i['refID']].seq)
+		ref_lengths.append(i['ref_length'])
 	
 		# query asm gaps
 		gaps_query = re.findall('([Nn]+)', str(query_dict[i['queryID']].seq))
@@ -100,6 +111,44 @@ def findGaps(scaffoldMapList, asm1, asm2, min_gap_size):
 		i['query_totalGapsLength'] = len("".join(gaps_query_filtered))
 		i['query_meanGapsLength'] = np.mean([len(x) for x in gaps_query_filtered]).round(decimals=2)
 		i['query_length'] = len(query_dict[i['queryID']].seq)
+		query_lengths.append(i['query_length'])
+		
+		# GC content
+		i['ref_GC'] = SeqUtils.GC(ref_dict[i['refID']].seq)
+		i['query_GC'] = SeqUtils.GC(query_dict[i['queryID']].seq)
+	
+	# scaffold length differences
+	lengthDiffs = [x['ref_length']-x['query_length'] for x in scaffoldMapList]
+	gapLengthDiffs = [x['ref_totalGapsLength']-x['query_totalGapsLength'] for x in scaffoldMapList]
+	gapCountDiffs = [x['ref_numGaps']-x['query_numGaps'] for x in scaffoldMapList]
+
+	figSizes = plt.figure()
+	sns.distplot(lengthDiffs, bins=20)
+	figSizes.savefig(outputPrefix + "_histogram-scaffold_diffs.pdf", bbox_inches='tight')
+	plt.close()
+	
+	# n50 - calc by slicing list of scaffolds lengths, using the index at the n50 entry
+	ref_lengths.sort(reverse=True)
+	query_lengths.sort(reverse=True)
+	ref_n50 = ref_lengths[len([x for x in np.cumsum(ref_lengths) if x <= np.sum(ref_lengths)*.5])-1]
+	query_n50 = query_lengths[len([x for x in np.cumsum(query_lengths) if x <= np.sum(query_lengths)*.5])-1]
+	
+	# write summary metrics
+	summaryOut = open(outputPrefix + "_summary.txt", "w")
+	summaryOut.write("Comparison between between scaffold pairs, 'Ref-value' minus 'Query-value' \n")
+	summaryOut.write("Average difference in scaffold lengths: %s bp\n" % np.mean(lengthDiffs).round(decimals=2))
+	summaryOut.write("Average difference in gap content: %s bp\n" % np.mean(gapLengthDiffs).round(decimals=2))
+	summaryOut.write("Average difference in number of gaps: %s\n\n" % np.mean(gapCountDiffs).round(decimals=2))
+
+	summaryOut.write("Total difference in scaffold lengths: %s bp\n" % np.sum(lengthDiffs))
+	summaryOut.write("Total difference in gap content: %s bp\n" % np.sum(gapLengthDiffs))
+	summaryOut.write("Total difference in number of gaps: %s\n\n" % np.sum(gapCountDiffs))
+	
+	summaryOut.write("Ref scaffolds N50: %s\n" % ref_n50)
+	summaryOut.write("Query scaffolds N50: %s\n" % query_n50)
+
+	summaryOut.close()
+
 	return scaffoldMapList
 
 
@@ -115,10 +164,11 @@ def run() :
 	(scaffoldMapList, hitsListAll) = runMapper(referenceIndex = refIndex, asm2Filename = args.asm2Filename, minQueryLen = args.minQueryLen, saveMinimap = args.saveMinimap)
 
 	# run gap finding
-	scaffoldMapList = findGaps(scaffoldMapList=scaffoldMapList, asm1=args.asm1Filename, asm2=args.asm2Filename, min_gap_size = 10)
+	scaffoldMapList = getMetrics(scaffoldMapList=scaffoldMapList, asm1=args.asm1Filename, asm2=args.asm2Filename, min_gap_size = 10, outputPrefix = args.outputPrefix)
 
 	# write output
 	writeOutput(outputPrefix = args.outputPrefix, saveMinimap = args.saveMinimap, scaffoldMapListOut = scaffoldMapList, hitsListAllOut = hitsListAll)
+	
 
 	print("DONE")
 
