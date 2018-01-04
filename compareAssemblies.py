@@ -19,16 +19,18 @@ def parseArgs() :
 	parser = argparse.ArgumentParser(description='compare assemblies with minimap2')
 	parser.add_argument('-r', help='input assembly 1 (ref) fasta', dest='asm1Filename',required=True)
 	parser.add_argument('-q', help='input assembly 2 (query) fasta', dest='asm2Filename',required=True)
-	parser.add_argument('-m', help='minimum sequence length in assembly 2 (query), default=20Mb', dest='minQueryLen',required=False, default=20000000, type=int)
+	parser.add_argument('-m', help='minimum gap size, default=25', dest='minGapSize',required=False, default=25, type=int)
+	parser.add_argument('-n', help='minimum sequence length in assembly 2 (query), default=20Mb', dest='minQueryLen',required=False, default=20000000, type=int)
 	parser.add_argument('-o', help='output prefix, default=output', dest='outputPrefix', required=False, default='output')
 	parser.add_argument('-d', help='turn off saving minimap2 results', dest='saveMinimap', required=False, action='store_false', default=True)
 	arguments = parser.parse_args()
 	print("arguments:")
-	print("input assembly 1 (ref) fasta: %s" % arguments.asm1Filename)
-	print("input assembly 2 (query) fasta: %s" % arguments.asm2Filename)
-	print("minimum sequence length in assembly 2: %i" % arguments.minQueryLen)
-	print("output prefix: %s" % arguments.outputPrefix)
-	print("turn off saving minimap2 results: %s" % arguments.saveMinimap)
+	print("-r, input assembly 1 (ref) fasta: %s" % arguments.asm1Filename)
+	print("-q, input assembly 2 (query) fasta: %s" % arguments.asm2Filename)
+	print("-m, minimum gap size: %i" % arguments.minGapSize)
+	print("-n, minimum sequence length in assembly 2: %i" % arguments.minQueryLen)
+	print("-o, output prefix: %s" % arguments.outputPrefix)
+	print("(-d), save minimap2 results?: %s" % arguments.saveMinimap)
 	print("-- \n")
 		
 	return arguments
@@ -164,7 +166,7 @@ def run() :
 	(scaffoldMapList, hitsListAll) = runMapper(referenceIndex = refIndex, asm2Filename = args.asm2Filename, minQueryLen = args.minQueryLen, saveMinimap = args.saveMinimap)
 
 	# run gap finding
-	scaffoldMapList = getMetrics(scaffoldMapList=scaffoldMapList, asm1=args.asm1Filename, asm2=args.asm2Filename, min_gap_size = 10, outputPrefix = args.outputPrefix)
+	scaffoldMapList = getMetrics(scaffoldMapList=scaffoldMapList, asm1=args.asm1Filename, asm2=args.asm2Filename, min_gap_size = args.minGapSize, outputPrefix = args.outputPrefix)
 
 	# write output
 	writeOutput(outputPrefix = args.outputPrefix, saveMinimap = args.saveMinimap, scaffoldMapListOut = scaffoldMapList, hitsListAllOut = hitsListAll)
