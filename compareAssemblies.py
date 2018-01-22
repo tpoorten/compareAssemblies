@@ -48,8 +48,13 @@ def getTopHitByAlignmentLength(hitsList, queryID) :
 	hitsDf_subset = hitsDf[hitsDf['q']==queryID]
 	grouped = hitsDf_subset.groupby('ctg')
 	# get ctg with most total alignments
-	output = {'top_aln_id': grouped['blen'].sum().idxmax(), \
+	if grouped :
+		output = {'top_aln_id': grouped['blen'].sum().idxmax(), \
               'top_aln_blen': grouped['blen'].sum().max()
+              }
+	else :
+		output = {'top_aln_id': 'NONE', \
+              'top_aln_blen': 'NONE'
               }
 	return output
 
@@ -66,11 +71,12 @@ def runMapper(referenceIndex, asm2Filename, minQueryLen, saveMinimap) :
 		for hit in referenceIndex.map(seq):
 			if hit.is_primary:
 				hits.append(name+"\t"+str(len(seq))+"\t"+str(hit))
-				if saveMinimap:
+		if hits:
+			if saveMinimap:
 					hitsListAll0.append(name+"\t"+str(len(seq))+"\t"+str(hit))
-		topAln = getTopHitByAlignmentLength(hits, name)
-		print("Top hit: %s\n" % topAln['top_aln_id'])        
-		scaffoldMapList0.append({'queryID': name, 
+			topAln = getTopHitByAlignmentLength(hits, name)
+			print("Top hit: %s\n" % topAln['top_aln_id'])        
+			scaffoldMapList0.append({'queryID': name, 
 								 'refID' : topAln['top_aln_id'], 
 								 'alignLen' : topAln['top_aln_blen'],
 								 })
